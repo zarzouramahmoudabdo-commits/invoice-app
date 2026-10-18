@@ -230,6 +230,7 @@ input::placeholder{color:var(--muted);opacity:.7}
     <section id="tab-preview" hidden>
       <div class="pv-bar">
         <button type="button" class="btn" id="b-pdf" data-act="pdf">حفظ PDF</button>
+        <button type="button" class="btn" id="b-xlsx" data-act="xlsx">حفظ Excel</button>
         <button type="button" class="btn ghost" data-act="copy">نسخ كنص للواتساب</button>
         <button type="button" class="btn ghost" data-act="save">حفظ الفاتورة</button>
         <button type="button" class="btn ghost" data-act="to-form">تعديل</button>
@@ -562,8 +563,6 @@ input::placeholder{color:var(--muted);opacity:.7}
 
   /* ---------- export ---------- */
   async function exportPdf(btn){
-    var dl=null;
-    try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null}catch(e){dl=null}
     if(!window.html2canvas||!window.jspdf){toast('أدوات الـ PDF لم تتحمل. اتأكد إن في إنترنت وجرب تاني');return}
     var old=btn.textContent;btn.disabled=true;btn.textContent='جاري التجهيز…';
     var holder=document.createElement('div');
@@ -578,38 +577,200 @@ input::placeholder{color:var(--muted);opacity:.7}
       var pages=Math.max(1,Math.ceil(ih/ph-0.001));
       for(var p=0;p<pages;p++){if(p>0)pdf.addPage();pdf.addImage(img,'JPEG',0,-p*ph,pw,ih)}
       var name='invoice-'+String(draft.no||'draft').replace(/[^\w\-]+/g,'_')+'.pdf';
-      var blob=pdf.output('blob');
-      var done=false;
-      if(dl){
-        try{await dl.save({filename:name,data:blob});toast('تم حفظ الفاتورة PDF');done=true}
-        catch(err){if(err&&err.code==='declined')done=true}
-      }
-      if(!done)showSaveSheet(canvas,blob,name,!!dl);
+      offerFile({blob:pdf.output('blob'),name:name,title:'ملف الـ PDF جاهز',image:canvas.toDataURL('image/png')});
     }catch(err){toast('تعذر تجهيز الـ PDF')}
     finally{holder.remove();btn.disabled=false;btn.textContent=old}
   }
-  function showSaveSheet(canvas,blob,name,inViewer){
+  function exportXlsx(){
+    try{
+      var blob=buildXlsx(draft);
+      var name='invoice-'+String(draft.no||'draft').replace(/[^\w\-]+/g,'_')+'.xlsx';
+      offerFile({blob:blob,name:name,title:'ملف الـ Excel جاهز'});
+    }catch(err){toast('تعذر تجهيز ملف الـ Excel')}
+  }
+
+  /* ---------- save / share a generated file ---------- */
+  function canShareFiles(){
+    try{
+      if(window.claude)return false;
+      return !!(navigator.share&&navigator.canShare&&navigator.canShare({files:[new File(['x'],'a.pdf',{type:'application/pdf'})]}));
+    }catch(e){return false}
+  }
+  async function saveFile(o){
+    var dl=null;
+    try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null}catch(e){dl=null}
+    if(dl){
+      try{await dl.save({filename:o.name,data:o.blob});toast('تم الحفظ')}
+      catch(err){if(!(err&&err.code==='declined'))toast('الحفظ مش متاح هنا')}
+      return;
+    }
+    try{
+      var u=URL.createObjectURL(o.blob);
+      var a=document.createElement('a');a.href=u;a.download=o.name;a.rel='noopener';
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(function(){URL.revokeObjectURL(u)},20000);
+      toast('بدأ التحميل. شوف مجلد التنزيلات');
+    }catch(e){toast('التحميل المباشر مش شغال هنا. جرّب زر المشاركة')}
+  }
+  async function shareFile(o){
+    try{
+      var file=new File([o.blob],o.name,{type:o.blob.type||'application/octet-stream'});
+      if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:o.name});return}
+      toast('المشاركة مش متاحة هنا. استخدم زر الحفظ');
+    }catch(e){if(!(e&&e.name==='AbortError'))toast('تعذرت المشاركة')}
+  }
+  function offerFile(o){
     var old=document.getElementById('save-sheet');if(old)old.remove();
-    var url=canvas.toDataURL('image/png');
     var ov=document.createElement('div');ov.id='save-sheet';
-    ov.style.cssText='position:fixed;inset:0;z-index:30;background:rgba(5,15,17,.92);overflow:auto;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));direction:rtl';
+    ov.style.cssText='position:fixed;inset:0;z-index:30;background:rgba(5,15,17,.94);overflow:auto;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));direction:rtl';
+    var share=canShareFiles();
     ov.innerHTML='<div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:12px">'+
-      '<div style="color:#fff;font:600 14px/1.7 var(--font-body)">الموبايل ده مش بيسمح بحفظ ملف من جوه التطبيق. اضغط على الصورة مطولاً واختار حفظ الصورة، أو خد لقطة شاشة.'+(inViewer?'':' ولو الزر اللي تحت اشتغل هيحفظ الـ PDF.')+'</div>'+
-      '<div style="display:flex;gap:10px;flex-wrap:wrap">'+(inViewer?'':'<button class="btn" id="ss-share" type="button">مشاركة / حفظ PDF</button>')+'<button class="btn ghost" id="ss-close" type="button" style="background:#fff">إغلاق</button></div>'+
-      '<img alt="الفاتورة" src="'+url+'" style="width:100%;background:#fff;border-radius:4px"></div>';
+      '<div style="color:#fff;font:800 18px var(--font-display)">'+esc(o.title)+'</div>'+
+      '<div style="color:#dcecee;font:500 14px/1.8 var(--font-body)"><span dir="ltr" style="unicode-bidi:isolate">'+esc(o.name)+'</span><br>اضغط حفظ وشوف مجلد التنزيلات. ولو الحفظ ما اشتغلش، جرّب المشاركة واختار الحفظ في الملفات أو ابعته على واتساب.</div>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="ss-save" type="button">حفظ على الموبايل</button>'+
+      (share?'<button class="btn" id="ss-share" type="button">مشاركة</button>':'')+
+      '<button class="btn ghost" id="ss-close" type="button" style="background:#fff">إغلاق</button></div>'+
+      (o.image?'<div style="color:#b9d3d7;font:500 13px/1.7 var(--font-body)">طريقة تانية: اضغط على الصورة مطولاً واختار حفظ الصورة.</div><img alt="الفاتورة" src="'+o.image+'" style="width:100%;background:#fff;border-radius:4px">':'')+
+      '</div>';
     document.body.appendChild(ov);
     ov.querySelector('#ss-close').onclick=function(){ov.remove()};
-    var sh=ov.querySelector('#ss-share');
-    if(sh)sh.onclick=async function(){
-      try{
-        var file=new File([blob],name,{type:'application/pdf'});
-        if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return}
-      }catch(e){if(e&&e.name==='AbortError')return}
-      try{
-        var u=URL.createObjectURL(blob);var a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},8000);
-      }catch(e){toast('الحفظ مش متاح هنا. احفظ الصورة بدل كده')}
-    };
+    ov.querySelector('#ss-save').onclick=function(){saveFile(o)};
+    var sh=ov.querySelector('#ss-share');if(sh)sh.onclick=function(){shareFile(o)};
   }
+
+  /* ---------- Excel (.xlsx) built in the page, no libraries ---------- */
+  var CRC=(function(){var t=new Uint32Array(256);for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+  function crc32(u8){var c=0xFFFFFFFF;for(var i=0;i<u8.length;i++)c=CRC[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+  function zipStore(files,mime){
+    var enc=new TextEncoder(),parts=[],central=[],offset=0;
+    files.forEach(function(f){
+      var nameB=enc.encode(f.name),data=enc.encode(f.text),crc=crc32(data),size=data.length;
+      var lh=new DataView(new ArrayBuffer(30));
+      lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+      lh.setUint16(10,0,true);lh.setUint16(12,0x21,true);lh.setUint32(14,crc,true);lh.setUint32(18,size,true);
+      lh.setUint32(22,size,true);lh.setUint16(26,nameB.length,true);lh.setUint16(28,0,true);
+      parts.push(new Uint8Array(lh.buffer),nameB,data);
+      var ch=new DataView(new ArrayBuffer(46));
+      ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+      ch.setUint16(10,0,true);ch.setUint16(12,0,true);ch.setUint16(14,0x21,true);ch.setUint32(16,crc,true);
+      ch.setUint32(20,size,true);ch.setUint32(24,size,true);ch.setUint16(28,nameB.length,true);
+      ch.setUint32(42,offset,true);
+      central.push(new Uint8Array(ch.buffer),nameB);
+      offset+=30+nameB.length+size;
+    });
+    var cdSize=central.reduce(function(a,p){return a+p.length},0);
+    var end=new DataView(new ArrayBuffer(22));
+    end.setUint32(0,0x06054b50,true);end.setUint16(8,files.length,true);end.setUint16(10,files.length,true);
+    end.setUint32(12,cdSize,true);end.setUint32(16,offset,true);
+    return new Blob(parts.concat(central,[new Uint8Array(end.buffer)]),{type:mime});
+  }
+  function buildXlsx(inv){
+    var c=calc(inv);
+    var X=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]})};
+    var R6=function(n){return Math.round(n*1e6)/1e6};
+    var colL=function(i){return 'ABCDEFGHI'.charAt(i)};
+    var cells={},merges=[],heights={};
+    var S={title:1,sub:2,label:3,val:4,head:5,txt:6,num:7,int:8,tlbl:9,tval:10,nlbl:11,nval:12,sigl:13,line:14,note:15};
+    function put(r,ci,st,val,kind,formula){
+      var ref=colL(ci)+r,xml;
+      if(kind==='n')xml='<c r="'+ref+'" s="'+st+'">'+(formula?'<f>'+X(formula)+'</f>':'')+'<v>'+R6(val)+'</v></c>';
+      else if(String(val==null?'':val)!=='')xml='<c r="'+ref+'" s="'+st+'" t="inlineStr"><is><t xml:space="preserve">'+X(val)+'</t></is></c>';
+      else xml='<c r="'+ref+'" s="'+st+'"/>';
+      (cells[r]=cells[r]||{})[ci]=xml;
+    }
+    function span(r,c0,c1,st,val,kind,formula){
+      put(r,c0,st,val,kind||'s',formula);
+      for(var i=c0+1;i<=c1;i++)put(r,i,st,'','s');
+      if(c1>c0)merges.push(colL(c0)+r+':'+colL(c1)+r);
+    }
+    var r=1;
+    span(r,0,8,S.title,'عبدالمنعم نعيم');heights[r]=32;
+    r=2;span(r,0,8,S.sub,'فاتورة مبيعات  |  INVOICE');heights[r]=22;
+    var info=[
+      ['رقم الفاتورة | Invoice No',inv.no,'التاريخ | Date',fmtDate(inv.date)],
+      ['العميل | Customer',inv.customer,'رقم العميل | Cust No.',inv.custNo],
+      ['تليفون | Tel',inv.tel,'المندوب | SalesMan',inv.salesman],
+      ['العنوان | Address',inv.address,'شروط الدفع | Payment Terms',inv.terms],
+      ['نوع البيع | Sale Type',inv.saleType,'رقم طلب الشراء | L.P.O No.',inv.lpo]
+    ];
+    r=3;
+    info.forEach(function(row){
+      r++;put(r,0,S.label,row[0]);span(r,1,3,S.val,row[1]);span(r,4,5,S.label,row[2]);span(r,6,8,S.val,row[3]);heights[r]=24;
+    });
+    r+=2;
+    var heads=['Item No\nرقم الصنف','Description\nالتفاصيل','Pack\nالشد','Unit\nالوحدة','Qty\nالكمية','Unit Price\nسعر الوحدة','Disc %\nنسبة الخصم','Disc\nالخصم','Total Price\nالإجمالي'];
+    heads.forEach(function(h,i){put(r,i,S.head,h)});heights[r]=38;
+    var first=r+1;
+    var rows=[];
+    inv.items.forEach(function(it,i){if(!isBlank(it))rows.push({it:it,l:c.lines[i]})});
+    if(!rows.length)rows.push({it:{no:'',desc:'',pack:'',unit:'',qty:0,price:0,discPct:0},l:{disc:0,total:0}});
+    rows.forEach(function(o){
+      r++;var it=o.it;
+      put(r,0,S.txt,it.no);put(r,1,S.txt,it.desc);
+      put(r,2,S.int,num(it.pack),'n');put(r,3,S.txt,it.unit);put(r,4,S.int,num(it.qty),'n');
+      put(r,5,S.num,num(it.price),'n');put(r,6,S.num,num(it.discPct),'n');
+      put(r,7,S.num,o.l.disc,'n','E'+r+'*F'+r+'*G'+r+'/100');
+      put(r,8,S.num,o.l.total,'n','E'+r+'*F'+r+'-H'+r);
+      heights[r]=26;
+    });
+    var last=r;
+    r++;var rTot=r;span(r,0,7,S.tlbl,'المبلغ الإجمالي | Total');put(r,8,S.tval,c.total,'n','SUM(I'+first+':I'+last+')');heights[r]=24;
+    r++;var rPct=r;span(r,0,7,S.tlbl,'نسبة الخصم % | Discount %');put(r,8,S.tval,num(inv.discPct),'n');heights[r]=24;
+    r++;var rFix=r;span(r,0,7,S.tlbl,'خصم بمبلغ ثابت | Fixed Discount');put(r,8,S.tval,num(inv.discAmt),'n');heights[r]=24;
+    r++;var rDis=r;span(r,0,7,S.tlbl,'الخصم | Discount');put(r,8,S.tval,c.discount,'n','I'+rTot+'*I'+rPct+'/100+I'+rFix);heights[r]=24;
+    r++;span(r,0,7,S.nlbl,'الصافي | Net');put(r,8,S.nval,c.net,'n','I'+rTot+'-I'+rDis);heights[r]=28;
+    r+=2;span(r,0,8,S.note,'استلمت البضاعة المذكورة أعلاه بحالة جيدة وأتعهد بتسديد قيمتها عند الطلب');heights[r]=30;
+    r+=2;
+    put(r,0,S.sigl,'المحاسب | Accountant');put(r,1,S.sigl,'البائع | Salesman');span(r,2,5,S.sigl,'أمين المخازن | StoreKeeper');span(r,6,8,S.sigl,'الموزع | Delivery Man');heights[r]=22;
+    r++;put(r,0,S.line,'');put(r,1,S.line,'');span(r,2,5,S.line,'');span(r,6,8,S.line,'');heights[r]=40;
+    r+=2;span(r,0,1,S.sigl,'اسم المستلم | Reciver Name');span(r,2,5,S.line,'');span(r,6,7,S.sigl,'التوقيع | Signature');put(r,8,S.line,'');heights[r]=34;
+    var lastRow=r;
+    var widths=[24,38,8,10,9,13,10,11,14];
+    var cols=widths.map(function(w,i){return '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>'}).join('');
+    var rowsXml='';
+    for(var rr=1;rr<=lastRow;rr++){
+      var rc=cells[rr];if(!rc&&!heights[rr])continue;
+      var cx='';if(rc)Object.keys(rc).map(Number).sort(function(a,b){return a-b}).forEach(function(k){cx+=rc[k]});
+      rowsXml+='<row r="'+rr+'"'+(heights[rr]?' ht="'+heights[rr]+'" customHeight="1"':'')+'>'+cx+'</row>';
+    }
+    var NS='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+    var HEAD='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    var sheet=HEAD+'<worksheet '+NS+'><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:I'+lastRow+'"/>'+
+      '<sheetViews><sheetView showGridLines="0" rightToLeft="1" workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="18"/>'+
+      '<cols>'+cols+'</cols><sheetData>'+rowsXml+'</sheetData>'+
+      '<mergeCells count="'+merges.length+'">'+merges.map(function(m){return '<mergeCell ref="'+m+'"/>'}).join('')+'</mergeCells>'+
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'+
+      '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/></worksheet>';
+    var font=function(b,sz,color){return '<font>'+(b?'<b/>':'')+'<sz val="'+sz+'"/>'+(color?'<color rgb="'+color+'"/>':'')+'<name val="Arial"/></font>'};
+    var xf=function(fo,fi,bo,nf,h){return '<xf numFmtId="'+nf+'" fontId="'+fo+'" fillId="'+fi+'" borderId="'+bo+'" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="'+h+'" vertical="center" wrapText="1"/></xf>'};
+    var styles=HEAD+'<styleSheet '+NS+'>'+
+      '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.000"/></numFmts>'+
+      '<fonts count="9">'+font(0,11)+font(1,11)+font(1,11,'FFFFFFFF')+font(1,18,'FF0E6B78')+font(1,12,'FFE8503A')+font(1,13)+font(0,10)+font(0,10,'FFE8503A')+font(1,13,'FFFFFFFF')+'</fonts>'+
+      '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'+
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFA8DBE3"/><bgColor indexed="64"/></patternFill></fill>'+
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF0E6B78"/><bgColor indexed="64"/></patternFill></fill>'+
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F5F5"/><bgColor indexed="64"/></patternFill></fill></fills>'+
+      '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'+
+      '<border><left style="thin"><color rgb="FF3A3A3A"/></left><right style="thin"><color rgb="FF3A3A3A"/></right><top style="thin"><color rgb="FF3A3A3A"/></top><bottom style="thin"><color rgb="FF3A3A3A"/></bottom><diagonal/></border></borders>'+
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+      '<cellXfs count="16">'+
+        xf(0,0,0,0,'general')+xf(3,0,0,0,'center')+xf(4,0,0,0,'center')+xf(1,4,1,0,'right')+xf(0,0,1,0,'right')+
+        xf(2,3,1,0,'center')+xf(0,0,1,0,'center')+xf(0,0,1,164,'center')+xf(0,0,1,0,'center')+xf(1,2,1,0,'right')+
+        xf(1,0,1,164,'center')+xf(8,3,1,0,'right')+xf(5,2,1,164,'center')+xf(7,0,0,0,'right')+xf(0,0,1,0,'center')+xf(6,0,0,0,'right')+
+      '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    var ct=HEAD+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'+
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+    var rels=HEAD+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    var wb=HEAD+'<workbook '+NS+' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="فاتورة" sheetId="1" r:id="rId1"/></sheets></workbook>';
+    var wbRels=HEAD+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+    return zipStore([
+      {name:'[Content_Types].xml',text:ct},{name:'_rels/.rels',text:rels},{name:'xl/workbook.xml',text:wb},
+      {name:'xl/_rels/workbook.xml.rels',text:wbRels},{name:'xl/styles.xml',text:styles},{name:'xl/worksheets/sheet1.xml',text:sheet}
+    ],'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }
+
   function invoiceText(){
     var c=calc(draft);
     var lines=['*فاتورة رقم '+draft.no+'*','التاريخ: '+fmtDate(draft.date)+(draft.saleType?' ('+draft.saleType+')':''),'العميل: '+draft.customer];
@@ -669,6 +830,7 @@ input::placeholder{color:var(--muted);opacity:.7}
       if(dirty)twice(b,'مش محفوظة. اضغط للتأكيد',go);else go();
     }
     else if(a==='pdf'){exportPdf(b)}
+    else if(a==='xlsx'){exportXlsx()}
     else if(a==='copy'){copyText()}
     else if(a==='wa-me'){sendWA(true)}
     else if(a==='wa-share'){sendWA(false)}
