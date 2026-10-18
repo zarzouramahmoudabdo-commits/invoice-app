@@ -10,7 +10,7 @@
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
-<title>فواتير المبيعات</title>
+<title>عبدالمنعم نعيم</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
@@ -47,6 +47,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .head{padding-top:18px}
 .head h1{font:800 26px/1.2 var(--font-display);margin:0}
 .head p{margin:6px 0 0;color:var(--muted);font-size:14px}
+.head .st{font:600 12.5px var(--font-display)}
+.head .st.bad{color:var(--danger)}
 
 .tabs{
   position:sticky;top:env(safe-area-inset-top,0px);z-index:9;margin-block:14px;
@@ -94,6 +96,10 @@ input::placeholder{color:var(--muted);opacity:.7}
 .pv-wrap{direction:ltr;max-width:794px;margin-inline:auto;overflow:hidden;border:1px solid var(--line);border-radius:4px;background:#fff}
 .pv-scale{width:794px;transform-origin:top left}
 
+.wa{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;flex-direction:column;gap:12px}
+.wa h3{font:800 15px var(--font-display);margin:0}
+.wa .grid{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.wa .hint{margin:0;color:var(--muted);font-size:12.5px}
 .search{margin-bottom:12px}
 .rows{display:flex;flex-direction:column}
 .row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
@@ -154,8 +160,9 @@ input::placeholder{color:var(--muted);opacity:.7}
 
 <div id="app" dir="rtl" lang="ar">
   <header class="head">
-    <h1>فواتير المبيعات</h1>
-    <p>اكتب البيانات في الخانات والفاتورة تطلع بنفس شكل فاتورة الشركة.</p>
+    <h1>عبدالمنعم نعيم</h1>
+    <p>فواتير المبيعات</p>
+    <p class="st" id="store-status" role="status"></p>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="أقسام التطبيق">
@@ -227,6 +234,18 @@ input::placeholder{color:var(--muted);opacity:.7}
         <button type="button" class="btn ghost" data-act="save">حفظ الفاتورة</button>
         <button type="button" class="btn ghost" data-act="to-form">تعديل</button>
       </div>
+      <div class="wa">
+        <h3>إرسال على واتساب</h3>
+        <div class="grid">
+          <label class="fld"><span>رقم الواتساب بتاعك</span><input id="wa-phone" class="num" inputmode="tel" placeholder="01xxxxxxxxx" autocomplete="tel"></label>
+          <label class="fld"><span>كود الدولة</span><input id="wa-cc" class="num" inputmode="numeric" placeholder="20" autocomplete="off"></label>
+        </div>
+        <p class="hint">الرقم اللي بيبدأ بصفر هيتحول تلقائياً بكود الدولة. الرقم بيتحفظ لوحده.</p>
+        <div class="actions">
+          <button type="button" class="btn" data-act="wa-me">ابعت لرقمي على واتساب</button>
+          <button type="button" class="btn ghost" data-act="wa-share">مشاركة على واتساب</button>
+        </div>
+      </div>
       <div class="pv-wrap" id="pv-wrap"><div class="pv-scale" id="pv-scale"></div></div>
     </section>
 
@@ -253,8 +272,9 @@ input::placeholder{color:var(--muted);opacity:.7}
   var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
   var LS={
     get:function(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},
-    set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+    set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v));return localStorage.getItem(k)!==null}catch(e){return false}}
   };
+  var storageOK=(function(){try{localStorage.setItem('_t','1');var v=localStorage.getItem('_t')==='1';localStorage.removeItem('_t');return v}catch(e){return false}})();
   var uid=function(){return 'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)};
   var p2=function(n){return String(n).padStart(2,'0')};
   var todayISO=function(){var d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
@@ -284,6 +304,7 @@ input::placeholder{color:var(--muted);opacity:.7}
   var col=null;
   var cat={customers:new Map(),byNo:new Map(),byDesc:new Map()};
 
+  var settings=LS.get('sales-invoice-settings')||{phone:'',cc:'20'};
   function saveDraft(){LS.set('sales-invoice-draft',draft)}
 
   function calc(inv){
@@ -450,8 +471,13 @@ input::placeholder{color:var(--muted);opacity:.7}
     $('#t-saved').textContent='المحفوظة'+(invoices.length?' ('+invoices.length+')':'');
     renderSaved();
   }
+  function setStatus(kind){
+    var el=$('#store-status');if(!el)return;
+    el.className='st'+(kind==='none'?' bad':'');
+    el.textContent=kind==='db'?'الفواتير بتتحفظ على حسابك':kind==='local'?'الفواتير بتتحفظ على الجهاز ده':'الحفظ مش شغال هنا. التطبيق مش قادر يخزن بيانات على الجهاز.';
+  }
   function useLocal(){
-    col=null;
+    col=null;setStatus(storageOK?'local':'none');
     invoices=(LS.get('sales-invoice-list')||[]).sort(function(a,b){return (b.savedAt||0)-(a.savedAt||0)});
     onInvoices();
   }
@@ -459,7 +485,7 @@ input::placeholder{color:var(--muted);opacity:.7}
     var db=null;
     try{db=window.claude&&window.claude.use?await window.claude.use('db'):null}catch(e){db=null}
     if(!db){useLocal();return}
-    col=db.collection('invoices');
+    col=db.collection('invoices');setStatus('db');
     col.orderBy('savedAt','desc').limit(500).onSnapshot(function(s){
       invoices=s.docs.map(function(d){var o=Object.assign({},d.data());o.uid=d.id;return o});
       onInvoices();
@@ -477,7 +503,9 @@ input::placeholder{color:var(--muted);opacity:.7}
       if(col){await col.doc(draft.uid).set(rec)}
       else{
         var list=(LS.get('sales-invoice-list')||[]).filter(function(x){return x.uid!==draft.uid});
-        list.unshift(rec);LS.set('sales-invoice-list',list);invoices=list;onInvoices();
+        list.unshift(rec);
+        if(!LS.set('sales-invoice-list',list)){toast('الحفظ فشل: الجهاز مش بيسمح بتخزين البيانات في التطبيق ده');return false}
+        invoices=list;onInvoices();
       }
       dirty=false;toast('تم حفظ فاتورة رقم '+draft.no);return true;
     }catch(err){toast('تعذر الحفظ، جرب مرة تانية');return false}
@@ -485,7 +513,7 @@ input::placeholder{color:var(--muted);opacity:.7}
   async function removeInvoice(id){
     try{
       if(col){await col.doc(id).delete()}
-      else{var list=(LS.get('sales-invoice-list')||[]).filter(function(x){return x.uid!==id});LS.set('sales-invoice-list',list);invoices=list;onInvoices()}
+      else{var list=(LS.get('sales-invoice-list')||[]).filter(function(x){return x.uid!==id});if(!LS.set('sales-invoice-list',list))throw new Error('ls');invoices=list;onInvoices()}
       toast('تم حذف الفاتورة');
     }catch(err){toast('تعذر الحذف')}
   }
@@ -536,8 +564,7 @@ input::placeholder{color:var(--muted);opacity:.7}
   async function exportPdf(btn){
     var dl=null;
     try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null}catch(e){dl=null}
-    if(!dl){dl={save:function(o){var url=URL.createObjectURL(o.data);var a=document.createElement('a');a.href=url;a.download=o.filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},5000);return Promise.resolve({status:'saved'})}}}
-    if(!window.html2canvas||!window.jspdf){toast('أدوات الـ PDF لم تتحمل، جرب تاني');return}
+    if(!window.html2canvas||!window.jspdf){toast('أدوات الـ PDF لم تتحمل. اتأكد إن في إنترنت وجرب تاني');return}
     var old=btn.textContent;btn.disabled=true;btn.textContent='جاري التجهيز…';
     var holder=document.createElement('div');
     holder.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#fff';
@@ -551,25 +578,81 @@ input::placeholder{color:var(--muted);opacity:.7}
       var pages=Math.max(1,Math.ceil(ih/ph-0.001));
       for(var p=0;p<pages;p++){if(p>0)pdf.addPage();pdf.addImage(img,'JPEG',0,-p*ph,pw,ih)}
       var name='invoice-'+String(draft.no||'draft').replace(/[^\w\-]+/g,'_')+'.pdf';
-      await dl.save({filename:name,data:pdf.output('blob')});
-      toast('تم حفظ الفاتورة PDF');
-    }catch(err){
-      if(!(err&&err.code==='declined'))toast('تعذر تجهيز الـ PDF');
-    }finally{holder.remove();btn.disabled=false;btn.textContent=old}
+      var blob=pdf.output('blob');
+      var done=false;
+      if(dl){
+        try{await dl.save({filename:name,data:blob});toast('تم حفظ الفاتورة PDF');done=true}
+        catch(err){if(err&&err.code==='declined')done=true}
+      }
+      if(!done)showSaveSheet(canvas,blob,name,!!dl);
+    }catch(err){toast('تعذر تجهيز الـ PDF')}
+    finally{holder.remove();btn.disabled=false;btn.textContent=old}
   }
-  async function copyText(){
+  function showSaveSheet(canvas,blob,name,inViewer){
+    var old=document.getElementById('save-sheet');if(old)old.remove();
+    var url=canvas.toDataURL('image/png');
+    var ov=document.createElement('div');ov.id='save-sheet';
+    ov.style.cssText='position:fixed;inset:0;z-index:30;background:rgba(5,15,17,.92);overflow:auto;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));direction:rtl';
+    ov.innerHTML='<div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:12px">'+
+      '<div style="color:#fff;font:600 14px/1.7 var(--font-body)">الموبايل ده مش بيسمح بحفظ ملف من جوه التطبيق. اضغط على الصورة مطولاً واختار حفظ الصورة، أو خد لقطة شاشة.'+(inViewer?'':' ولو الزر اللي تحت اشتغل هيحفظ الـ PDF.')+'</div>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap">'+(inViewer?'':'<button class="btn" id="ss-share" type="button">مشاركة / حفظ PDF</button>')+'<button class="btn ghost" id="ss-close" type="button" style="background:#fff">إغلاق</button></div>'+
+      '<img alt="الفاتورة" src="'+url+'" style="width:100%;background:#fff;border-radius:4px"></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('#ss-close').onclick=function(){ov.remove()};
+    var sh=ov.querySelector('#ss-share');
+    if(sh)sh.onclick=async function(){
+      try{
+        var file=new File([blob],name,{type:'application/pdf'});
+        if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return}
+      }catch(e){if(e&&e.name==='AbortError')return}
+      try{
+        var u=URL.createObjectURL(blob);var a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},8000);
+      }catch(e){toast('الحفظ مش متاح هنا. احفظ الصورة بدل كده')}
+    };
+  }
+  function invoiceText(){
     var c=calc(draft);
-    var lines=['فاتورة رقم '+draft.no,'التاريخ: '+fmtDate(draft.date)+(draft.saleType?' ('+draft.saleType+')':''),'العميل: '+draft.customer];
+    var lines=['*فاتورة رقم '+draft.no+'*','التاريخ: '+fmtDate(draft.date)+(draft.saleType?' ('+draft.saleType+')':''),'العميل: '+draft.customer];
     if(draft.salesman)lines.push('المندوب: '+draft.salesman);
     lines.push('','الأصناف:');
     draft.items.forEach(function(it,i){if(isBlank(it))return;lines.push((i+1)+') '+it.desc+' | '+fmtQ(it.qty)+' '+(it.unit||'')+' × '+fmt3(num(it.price))+' = '+fmt3(c.lines[i].total))});
-    lines.push('','الإجمالي: '+fmt3(c.total),'الخصم: '+fmt3(c.discount),'الصافي: '+fmt3(c.net));
-    var text=lines.join('\n');
+    lines.push('','الإجمالي: '+fmt3(c.total),'الخصم: '+fmt3(c.discount),'*الصافي: '+fmt3(c.net)+'*','','عبدالمنعم نعيم');
+    return lines.join('\n');
+  }
+  async function copyText(){
+    var text=invoiceText();
     try{await navigator.clipboard.writeText(text);toast('تم النسخ')}
     catch(e){
       var ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();
       try{document.execCommand('copy');toast('تم النسخ')}catch(e2){toast('تعذر النسخ')}ta.remove();
     }
+  }
+  function waNumber(){
+    var raw=String(settings.phone||'').trim();
+    var cc=String(settings.cc==null?'20':settings.cc).replace(/\D/g,'');
+    var d=raw.replace(/\D/g,'');
+    if(!d)return '';
+    if(raw.charAt(0)==='+')return d;
+    if(d.indexOf('00')===0)return d.slice(2);
+    if(d.charAt(0)==='0')return cc+d.slice(1);
+    return d;
+  }
+  function openLink(url){
+    if(window.claude){var a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';document.body.appendChild(a);a.click();a.remove();return}
+    window.location.href=url;
+  }
+  function sendWA(toMe){
+    var text=invoiceText();
+    if(toMe){
+      var n=waNumber();
+      if(!n){toast('اكتب رقم الواتساب بتاعك الأول');var f=$('#wa-phone');if(f)f.focus();return}
+      openLink('https://wa.me/'+n+'?text='+encodeURIComponent(text));return;
+    }
+    if(navigator.share&&!window.claude){
+      navigator.share({text:text}).catch(function(e){if(!e||e.name!=='AbortError')openLink('https://wa.me/?text='+encodeURIComponent(text))});
+      return;
+    }
+    openLink('https://wa.me/?text='+encodeURIComponent(text));
   }
 
   /* ---------- actions ---------- */
@@ -587,6 +670,8 @@ input::placeholder{color:var(--muted);opacity:.7}
     }
     else if(a==='pdf'){exportPdf(b)}
     else if(a==='copy'){copyText()}
+    else if(a==='wa-me'){sendWA(true)}
+    else if(a==='wa-share'){sendWA(false)}
     else if(a==='open'||a==='dup'){
       var inv=invoices.filter(function(x){return x.uid===b.dataset.id})[0];if(!inv)return;
       var copy=JSON.parse(JSON.stringify(inv));delete copy.savedAt;
@@ -596,6 +681,12 @@ input::placeholder{color:var(--muted);opacity:.7}
     else if(a==='del'){twice(b,'تأكيد الحذف',function(){removeInvoice(b.dataset.id)})}
   });
 
+  (function(){
+    var wp=$('#wa-phone'),wc=$('#wa-cc');
+    wp.value=settings.phone||'';wc.value=settings.cc==null?'20':settings.cc;
+    var save=function(){settings={phone:wp.value,cc:wc.value};LS.set('sales-invoice-settings',settings)};
+    wp.addEventListener('input',save);wc.addEventListener('input',save);
+  })();
   fillForm();
   initStore();
   if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}
